@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Burnley → Glen Waverley</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .pulse { animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+  <div class="max-w-md mx-auto p-4">
+    <header class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-xl font-bold">Burnley Station</h1>
+        <p class="text-sm text-gray-400">Glen Waverley Line</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="updateTime" class="text-sm text-gray-400"></span>
+        <button onclick="fetchData()" class="p-2 rounded-full hover:bg-gray-700 transition">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div id="loading" class="hidden">
+      <div class="bg-gray-800 rounded-xl p-6 text-center">
+        <div class="pulse text-gray-400">Loading...</div>
+      </div>
+    </div>
+
+    <div id="error" class="hidden">
+      <div class="bg-red-900/50 border border-red-700 rounded-xl p-4">
+        <p class="font-semibold text-red-300">Error</p>
+        <p id="errorMessage" class="text-sm text-red-200"></p>
+      </div>
+    </div>
+
+    <div id="departures" class="space-y-3"></div>
+  </div>
+
+  <script>
+    function formatTime(iso) {
+      return new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
+    }
+
+    function formatRelative(iso) {
+      const diff = Math.round((new Date(iso) - new Date()) / 60000);
+      if (diff < 1) return 'Now';
+      if (diff === 1) return '1 min';
+      return diff + ' mins';
+    }
+
+    function showLoading() {
+      document.getElementById('loading').classList.remove('hidden');
+      document.getElementById('error').classList.add('hidden');
+      document.getElementById('departures').innerHTML = '';
+    }
+
+    function showError(msg) {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('error').classList.remove('hidden');
+      document.getElementById('errorMessage').textContent = msg;
+    }
+
+    function showData(data) {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('error').classList.add('hidden');
+      document.getElementById('updateTime').textContent = formatTime(data.timestamp);
+
+      const container = document.getElementById('departures');
+      container.innerHTML = '';
+
+      if (!data.departures?.length) {
+        container.innerHTML = '<div class="bg-gray-800 rounded-xl p-6 text-center text-gray-400">No upcoming trains</div>';
+        return;
+      }
+
+      data.departures.forEach((dep, i) => {
+        const time = dep.estimated || dep.scheduled;
+        const isFirst = i === 0;
+        const isDelayed = dep.estimated && new Date(dep.estimated) > new Date(dep.scheduled);
+
+        const card = document.createElement('div');
+        card.className = `bg-gray-800 rounded-xl p-4 ${isFirst ? 'ring-2 ring-blue-500' : ''}`;
+
+        let statusHtml = '';
+        if (dep.isRealTime) {
+          if (isDelayed) {
+            const delayMins = Math.round((new Date(dep.estimated) - new Date(dep.scheduled)) / 60000);
+            statusHtml = `<span class="text-yellow-400 text-xs">+${delayMins} min late</span>`;
+          } else {
+            statusHtml = '<span class="text-green-400 text-xs">On time</span>';
+          }
+        }
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-2xl font-bold">${formatTime(time)}</div>
+              <div class="text-sm text-gray-400">${formatRelative(time)}</div>
+            </div>
+            <div class="text-right">
+              ${dep.platform ? `<div class="text-lg">Platform ${dep.platform}</div>` : ''}
+              ${statusHtml}
+            </div>
+          </div>
+        `;
+
+        container.appendChild(card);
+      });
+    }
+
+    async function fetchData() {
+      showLoading();
+      try {
+        const res = await fetch('/api/departures');
+        const data = await res.json();
+        if (data.error && !data.departures) {
+          showError(data.message || data.error);
+        } else {
+          showData(data);
+        }
+      } catch (e) {
+        showError('Failed to connect');
+      }
+    }
+
+    fetchData();
+    setInterval(fetchData, 30000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') fetchData();
+    });
+  </script>
+</body>
+</html>

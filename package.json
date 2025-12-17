@@ -1,0 +1,8 @@
+{
+  "name": "burnley-trains",
+  "version": "1.0.0",
+  "description": "Next Glen Waverley trains from Burnley Station",
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -3,18 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Commute Dashboard</title>
+  <title>Commute</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
     .pulse { animation: pulse 1.5s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .tab { transition: all 0.2s; }
+    .tab.active { transform: scale(1.1); }
   </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen">
   <div class="max-w-md mx-auto p-4">
+    <!-- Tab Bar -->
     <header class="flex items-center justify-between mb-6">
-      <h1 class="text-xl font-bold">Commute</h1>
+      <div class="flex gap-3">
+        <button onclick="switchTab('train')" id="tab-train" class="tab w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center text-lg font-bold opacity-50">T</button>
+        <button onclick="switchTab('bus')" id="tab-bus" class="tab w-12 h-12 bg-orange-600 rounded-xl flex items-center justify-center text-lg font-bold opacity-50">B</button>
+        <button onclick="switchTab('switch')" id="tab-switch" class="tab w-12 h-12 bg-green-600 rounded-xl flex items-center justify-center text-lg font-bold opacity-50">S</button>
+      </div>
       <div class="flex items-center gap-2">
         <span id="updateTime" class="text-sm text-gray-400"></span>
         <button onclick="fetchData()" class="p-2 rounded-full hover:bg-gray-700 transition">
@@ -38,34 +45,39 @@
       </div>
     </div>
 
-    <div id="content" class="hidden space-y-6">
-      <!-- Trains Section -->
-      <section>
-        <div class="flex items-center gap-2 mb-3">
-          <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-sm font-bold">T</div>
-          <div>
-            <h2 class="font-semibold">Burnley Station</h2>
-            <p class="text-xs text-gray-400">Glen Waverley Line</p>
-          </div>
-        </div>
-        <div id="trains" class="space-y-2"></div>
-      </section>
+    <!-- Train View -->
+    <div id="view-train" class="hidden">
+      <div class="mb-4">
+        <h2 class="text-lg font-semibold">Burnley Station</h2>
+        <p class="text-sm text-gray-400">Glen Waverley Line - Outbound</p>
+      </div>
+      <div id="trains" class="space-y-2"></div>
+    </div>
 
-      <!-- Buses Section -->
-      <section>
-        <div class="flex items-center gap-2 mb-3">
-          <div class="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center text-sm font-bold">B</div>
-          <div>
-            <h2 class="font-semibold">Woodside Ave/Clayton Rd</h2>
-            <p class="text-xs text-gray-400">733 to Mt Waverley</p>
-          </div>
-        </div>
-        <div id="buses" class="space-y-2"></div>
-      </section>
+    <!-- Bus View -->
+    <div id="view-bus" class="hidden">
+      <div class="mb-4">
+        <h2 class="text-lg font-semibold">Woodside Ave/Clayton Rd</h2>
+        <p class="text-sm text-gray-400">733 to Mt Waverley</p>
+      </div>
+      <div id="buses" class="space-y-2"></div>
+    </div>
+
+    <!-- Switch View -->
+    <div id="view-switch" class="hidden">
+      <div class="mb-4">
+        <h2 class="text-lg font-semibold">Train → Bus to Monash</h2>
+        <p class="text-sm text-gray-400">Best transfer option</p>
+      </div>
+      <div id="switch-recommendation" class="mb-4"></div>
+      <div id="switch-options" class="space-y-2"></div>
     </div>
   </div>
 
   <script>
+    let currentTab = 'train';
+    let data = {};
+
     function formatTime(iso) {
       return new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
     }
@@ -77,22 +89,41 @@
       return diff + ' mins';
     }
 
+    function getDefaultTab() {
+      const hour = new Date().getHours();
+      return hour < 12 ? 'train' : 'bus';
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      ['train', 'bus', 'switch'].forEach(t => {
+        document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+        document.getElementById('tab-' + t).classList.toggle('opacity-50', t !== tab);
+        document.getElementById('view-' + t).classList.toggle('hidden', t !== tab);
+      });
+      renderCurrentView();
+    }
+
     function showLoading() {
       document.getElementById('loading').classList.remove('hidden');
       document.getElementById('error').classList.add('hidden');
-      document.getElementById('content').classList.add('hidden');
+      ['train', 'bus', 'switch'].forEach(t => document.getElementById('view-' + t).classList.add('hidden'));
     }
 
     function showError(msg) {
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('error').classList.remove('hidden');
-      document.getElementById('content').classList.add('hidden');
       document.getElementById('errorMessage').textContent = msg;
+    }
+
+    function hideLoading() {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('error').classList.add('hidden');
+      document.getElementById('view-' + currentTab).classList.remove('hidden');
     }
 
     function renderDepartures(departures, container, type) {
       container.innerHTML = '';
-
       if (!departures?.length) {
         container.innerHTML = '<div class="bg-gray-800 rounded-lg p-4 text-center text-gray-400 text-sm">No upcoming departures</div>';
         return;
@@ -131,36 +162,101 @@
             </div>
           </div>
         `;
-
         container.appendChild(card);
       });
     }
 
-    function showData(data) {
-      document.getElementById('loading').classList.add('hidden');
-      document.getElementById('error').classList.add('hidden');
-      document.getElementById('content').classList.remove('hidden');
-      document.getElementById('updateTime').textContent = formatTime(data.timestamp);
+    function renderSwitch(switchData) {
+      const recContainer = document.getElementById('switch-recommendation');
+      const optContainer = document.getElementById('switch-options');
 
-      renderDepartures(data.trains?.departures, document.getElementById('trains'), 'train');
-      renderDepartures(data.buses?.departures, document.getElementById('buses'), 'bus');
+      if (!switchData.recommendation) {
+        recContainer.innerHTML = '<div class="bg-gray-800 rounded-xl p-4 text-center text-gray-400">No transfer options available</div>';
+        optContainer.innerHTML = '';
+        return;
+      }
+
+      const rec = switchData.recommendation;
+      recContainer.innerHTML = `
+        <div class="bg-gradient-to-br from-green-900 to-green-800 rounded-xl p-4 border border-green-700">
+          <div class="text-sm text-green-300 mb-1">RECOMMENDATION</div>
+          <div class="text-xl font-bold mb-1">Get off at ${rec.station}</div>
+          <div class="text-green-100">Take ${rec.bus.route} at ${formatTime(rec.bus.departure)}</div>
+          <div class="text-sm text-green-200 mt-2">Arrive Monash ~${formatTime(rec.arrivalAtMonash)} (${rec.totalMinutes} mins)</div>
+        </div>
+      `;
+
+      optContainer.innerHTML = '<div class="text-sm text-gray-400 mb-2">All options:</div>';
+
+      const stations = ['Mount Waverley', 'Syndal', 'Glen Waverley'];
+      const trainTimes = switchData.nextTrain || {};
+
+      stations.forEach(station => {
+        const stationOpts = switchData.allOptions?.filter(o => o.station === station) || [];
+        if (!stationOpts.length) return;
+
+        const isRec = rec.station === station;
+        const trainTime = station === 'Mount Waverley' ? trainTimes.atMountWaverley :
+                         station === 'Syndal' ? trainTimes.atSyndal : trainTimes.atGlenWaverley;
+
+        const card = document.createElement('div');
+        card.className = `bg-gray-800 rounded-lg p-3 ${isRec ? 'ring-2 ring-green-500' : ''}`;
+
+        const busesHtml = stationOpts.map(opt => {
+          const isThis = rec.bus.route === opt.bus.route && rec.station === opt.station;
+          return `<div class="text-sm ${isThis ? 'text-green-300' : 'text-gray-300'}">${opt.bus.route} @ ${formatTime(opt.bus.departure)} → ~${formatTime(opt.arrivalAtMonash)}</div>`;
+        }).join('');
+
+        card.innerHTML = `
+          <div class="flex justify-between items-center mb-2">
+            <span class="font-semibold ${isRec ? 'text-green-400' : ''}">${station}</span>
+            <span class="text-sm text-gray-400">train ${trainTime ? formatTime(trainTime) : '-'}</span>
+          </div>
+          ${busesHtml}
+        `;
+        optContainer.appendChild(card);
+      });
+    }
+
+    function renderCurrentView() {
+      if (!data.departures && !data.switch) return;
+
+      document.getElementById('updateTime').textContent = formatTime(data.departures?.timestamp || data.switch?.timestamp || new Date().toISOString());
+
+      if (currentTab === 'train') {
+        renderDepartures(data.departures?.trains?.departures, document.getElementById('trains'), 'train');
+      } else if (currentTab === 'bus') {
+        renderDepartures(data.departures?.buses?.departures, document.getElementById('buses'), 'bus');
+      } else if (currentTab === 'switch') {
+        renderSwitch(data.switch || {});
+      }
     }
 
     async function fetchData() {
       showLoading();
       try {
-        const res = await fetch('/api/departures');
-        const data = await res.json();
-        if (data.error && !data.trains) {
-          showError(data.message || data.error);
-        } else {
-          showData(data);
+        const [depRes, switchRes] = await Promise.all([
+          fetch('/api/departures'),
+          fetch('/api/switch'),
+        ]);
+        data.departures = await depRes.json();
+        data.switch = await switchRes.json();
+
+        if (data.departures.error && !data.departures.trains) {
+          showError(data.departures.message || data.departures.error);
+          return;
         }
+
+        hideLoading();
+        renderCurrentView();
       } catch (e) {
         showError('Failed to connect');
       }
     }
 
+    // Initialize
+    currentTab = getDefaultTab();
+    switchTab(currentTab);
     fetchData();
     setInterval(fetchData, 30000);
     document.addEventListener('visibilitychange', () => {

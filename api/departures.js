@@ -1,9 +1,15 @@
 import crypto from 'crypto';
 
 const PTV_BASE_URL = 'https://timetableapi.ptv.vic.gov.au';
+
+// Train: Burnley to Glen Waverley
 const BURNLEY_STOP_ID = 1030;
 const GLEN_WAVERLEY_DIRECTION_ID = 6;
 const GLEN_WAVERLEY_ROUTE_ID = 7;
+
+// Bus: Woodside Ave/Clayton Rd - 733 to Box Hill (via Mt Waverley)
+const BUS_STOP_ID = 22752;
+const BUS_ROUTE_733 = 13271;
 
 function signRequest(requestPath, devId, apiKey) {
   const url = requestPath + (requestPath.includes('?') ? '&' : '?') + `devid=${devId}`;
@@ -33,35 +39,54 @@ export default async function handler(req, res) {
   const apiKey = process.env.PTV_KEY;
 
   if (!devId || !apiKey) {
-    return res.status(500).json({
-      error: 'PTV API credentials not configured',
-    });
+    return res.status(500).json({ error: 'PTV API credentials not configured' });
   }
 
   try {
-    const path = `/v3/departures/route_type/0/stop/${BURNLEY_STOP_ID}/route/${GLEN_WAVERLEY_ROUTE_ID}?direction_id=${GLEN_WAVERLEY_DIRECTION_ID}&max_results=10&expand=run`;
-    const data = await fetchPTV(path, devId, apiKey);
+    // Fetch both train and bus data in parallel
+    const [trainData, busData] = await Promise.all([
+      fetchPTV(`/v3/departures/route_type/0/stop/${BURNLEY_STOP_ID}/route/${GLEN_WAVERLEY_ROUTE_ID}?direction_id=${GLEN_WAVERLEY_DIRECTION_ID}&max_results=10&expand=run`, devId, apiKey),
+      fetchPTV(`/v3/departures/route_type/2/stop/${BUS_STOP_ID}?max_results=10&expand=route&expand=direction`, devId, apiKey),
+    ]);
 
-    const departures = data.departures
+    // Process train departures
+    const trains = trainData.departures
       ?.filter(d => d.direction_id === GLEN_WAVERLEY_DIRECTION_ID)
-      .map(d => {
-        const scheduled = new Date(d.scheduled_departure_utc);
-        const estimated = d.estimated_departure_utc ? new Date(d.estimated_departure_utc) : null;
-        return {
-          scheduled: scheduled.toISOString(),
-          estimated: estimated?.toISOString() || null,
-          isRealTime: !!estimated,
-          platform: d.platform_number,
-        };
-      })
+      .map(d => ({
+        scheduled: new Date(d.scheduled_departure_utc).toISOString(),
+        estimated: d.estimated_departure_utc ? new Date(d.estimated_departure_utc).toISOString() : null,
+        isRealTime: !!d.estimated_departure_utc,
+        platform: d.platform_number,
+      }))
       .slice(0, 6) || [];
+
+    // Process bus departures - filter for 733 to Box Hill (via Mt Waverley)
+    const buses = busData.departures
+      ?.filter(d => {
+        const route = busData.routes?.[d.route_id];
+        const dir = busData.directions?.[d.direction_id];
+        return route?.route_number === '733' && dir?.direction_name === 'Box Hill';
+      })
+      .map(d => ({
+        scheduled: new Date(d.scheduled_departure_utc).toISOString(),
+        estimated: d.estimated_departure_utc ? new Date(d.estimated_departure_utc).toISOString() : null,
+        isRealTime: !!d.estimated_departure_utc,
+        route: '733',
+        destination: 'Box Hill via Mt Waverley',
+      }))
+      .slice(0, 4) || [];
 
     return res.status(200).json({
       timestamp: new Date().toISOString(),
-      station: 'Burnley',
-      line: 'Glen Waverley',
-      direction: 'Outbound',
-      departures,
+      trains: {
+        station: 'Burnley',
+        line: 'Glen Waverley',
+        departures: trains,
+      },
+      buses: {
+        stop: 'Woodside Ave/Clayton Rd',
+        departures: buses,
+      },
     });
   } catch (error) {
     console.error('API Error:', error);

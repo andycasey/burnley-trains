@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Burnley → Glen Waverley</title>
+  <title>Commute Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -14,10 +14,7 @@
 <body class="bg-gray-900 text-white min-h-screen">
   <div class="max-w-md mx-auto p-4">
     <header class="flex items-center justify-between mb-6">
-      <div>
-        <h1 class="text-xl font-bold">Burnley Station</h1>
-        <p class="text-sm text-gray-400">Glen Waverley Line</p>
-      </div>
+      <h1 class="text-xl font-bold">Commute</h1>
       <div class="flex items-center gap-2">
         <span id="updateTime" class="text-sm text-gray-400"></span>
         <button onclick="fetchData()" class="p-2 rounded-full hover:bg-gray-700 transition">
@@ -35,13 +32,37 @@
     </div>
 
     <div id="error" class="hidden">
-      <div class="bg-red-900/50 border border-red-700 rounded-xl p-4">
+      <div class="bg-red-900/50 border border-red-700 rounded-xl p-4 mb-4">
         <p class="font-semibold text-red-300">Error</p>
         <p id="errorMessage" class="text-sm text-red-200"></p>
       </div>
     </div>
 
-    <div id="departures" class="space-y-3"></div>
+    <div id="content" class="hidden space-y-6">
+      <!-- Trains Section -->
+      <section>
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-sm font-bold">T</div>
+          <div>
+            <h2 class="font-semibold">Burnley Station</h2>
+            <p class="text-xs text-gray-400">Glen Waverley Line</p>
+          </div>
+        </div>
+        <div id="trains" class="space-y-2"></div>
+      </section>
+
+      <!-- Buses Section -->
+      <section>
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center text-sm font-bold">B</div>
+          <div>
+            <h2 class="font-semibold">Woodside Ave/Clayton Rd</h2>
+            <p class="text-xs text-gray-400">733 to Mt Waverley</p>
+          </div>
+        </div>
+        <div id="buses" class="space-y-2"></div>
+      </section>
+    </div>
   </div>
 
   <script>
@@ -59,54 +80,53 @@
     function showLoading() {
       document.getElementById('loading').classList.remove('hidden');
       document.getElementById('error').classList.add('hidden');
-      document.getElementById('departures').innerHTML = '';
+      document.getElementById('content').classList.add('hidden');
     }
 
     function showError(msg) {
       document.getElementById('loading').classList.add('hidden');
       document.getElementById('error').classList.remove('hidden');
+      document.getElementById('content').classList.add('hidden');
       document.getElementById('errorMessage').textContent = msg;
     }
 
-    function showData(data) {
-      document.getElementById('loading').classList.add('hidden');
-      document.getElementById('error').classList.add('hidden');
-      document.getElementById('updateTime').textContent = formatTime(data.timestamp);
-
-      const container = document.getElementById('departures');
+    function renderDepartures(departures, container, type) {
       container.innerHTML = '';
 
-      if (!data.departures?.length) {
-        container.innerHTML = '<div class="bg-gray-800 rounded-xl p-6 text-center text-gray-400">No upcoming trains</div>';
+      if (!departures?.length) {
+        container.innerHTML = '<div class="bg-gray-800 rounded-lg p-4 text-center text-gray-400 text-sm">No upcoming departures</div>';
         return;
       }
 
-      data.departures.forEach((dep, i) => {
+      departures.forEach((dep, i) => {
         const time = dep.estimated || dep.scheduled;
         const isFirst = i === 0;
         const isDelayed = dep.estimated && new Date(dep.estimated) > new Date(dep.scheduled);
 
         const card = document.createElement('div');
-        card.className = `bg-gray-800 rounded-xl p-4 ${isFirst ? 'ring-2 ring-blue-500' : ''}`;
+        const ringColor = type === 'train' ? 'ring-blue-500' : 'ring-orange-500';
+        card.className = `bg-gray-800 rounded-lg p-3 ${isFirst ? 'ring-2 ' + ringColor : ''}`;
 
         let statusHtml = '';
         if (dep.isRealTime) {
           if (isDelayed) {
             const delayMins = Math.round((new Date(dep.estimated) - new Date(dep.scheduled)) / 60000);
-            statusHtml = `<span class="text-yellow-400 text-xs">+${delayMins} min late</span>`;
+            statusHtml = `<span class="text-yellow-400 text-xs">+${delayMins}m</span>`;
           } else {
             statusHtml = '<span class="text-green-400 text-xs">On time</span>';
           }
         }
 
+        const extraInfo = type === 'train' && dep.platform ? `<span class="text-gray-400">Plat ${dep.platform}</span>` : '';
+
         card.innerHTML = `
           <div class="flex items-center justify-between">
-            <div>
-              <div class="text-2xl font-bold">${formatTime(time)}</div>
-              <div class="text-sm text-gray-400">${formatRelative(time)}</div>
+            <div class="flex items-baseline gap-3">
+              <span class="text-xl font-bold">${formatTime(time)}</span>
+              <span class="text-sm text-gray-400">${formatRelative(time)}</span>
             </div>
-            <div class="text-right">
-              ${dep.platform ? `<div class="text-lg">Platform ${dep.platform}</div>` : ''}
+            <div class="flex items-center gap-2 text-sm">
+              ${extraInfo}
               ${statusHtml}
             </div>
           </div>
@@ -116,12 +136,22 @@
       });
     }
 
+    function showData(data) {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('error').classList.add('hidden');
+      document.getElementById('content').classList.remove('hidden');
+      document.getElementById('updateTime').textContent = formatTime(data.timestamp);
+
+      renderDepartures(data.trains?.departures, document.getElementById('trains'), 'train');
+      renderDepartures(data.buses?.departures, document.getElementById('buses'), 'bus');
+    }
+
     async function fetchData() {
       showLoading();
       try {
         const res = await fetch('/api/departures');
         const data = await res.json();
-        if (data.error && !data.departures) {
+        if (data.error && !data.trains) {
           showError(data.message || data.error);
         } else {
           showData(data);

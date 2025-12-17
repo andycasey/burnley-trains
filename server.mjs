@@ -18,9 +18,14 @@ if (fs.existsSync(envPath)) {
 const PTV_DEVID = process.env.PTV_DEVID;
 const PTV_KEY = process.env.PTV_KEY;
 const BASE_URL = 'https://timetableapi.ptv.vic.gov.au';
+
+// Train config
 const BURNLEY_STOP_ID = 1030;
 const GLEN_WAVERLEY_DIRECTION_ID = 6;
 const GLEN_WAVERLEY_ROUTE_ID = 7;
+
+// Bus config
+const BUS_STOP_ID = 22752;
 
 function signRequest(path) {
   const url = path + (path.includes('?') ? '&' : '?') + `devid=${PTV_DEVID}`;
@@ -28,13 +33,19 @@ function signRequest(path) {
   return `${BASE_URL}${url}&signature=${sig}`;
 }
 
+async function fetchPTV(path) {
+  const res = await fetch(signRequest(path));
+  return res.json();
+}
+
 async function handleAPI(res) {
   try {
-    const apiPath = `/v3/departures/route_type/0/stop/${BURNLEY_STOP_ID}/route/${GLEN_WAVERLEY_ROUTE_ID}?direction_id=${GLEN_WAVERLEY_DIRECTION_ID}&max_results=10&expand=run`;
-    const response = await fetch(signRequest(apiPath));
-    const data = await response.json();
+    const [trainData, busData] = await Promise.all([
+      fetchPTV(`/v3/departures/route_type/0/stop/${BURNLEY_STOP_ID}/route/${GLEN_WAVERLEY_ROUTE_ID}?direction_id=${GLEN_WAVERLEY_DIRECTION_ID}&max_results=10&expand=run`),
+      fetchPTV(`/v3/departures/route_type/2/stop/${BUS_STOP_ID}?max_results=10&expand=route&expand=direction`),
+    ]);
 
-    const departures = data.departures
+    const trains = trainData.departures
       ?.filter(d => d.direction_id === GLEN_WAVERLEY_DIRECTION_ID)
       .map(d => ({
         scheduled: new Date(d.scheduled_departure_utc).toISOString(),
@@ -44,13 +55,26 @@ async function handleAPI(res) {
       }))
       .slice(0, 6) || [];
 
+    const buses = busData.departures
+      ?.filter(d => {
+        const route = busData.routes?.[d.route_id];
+        const dir = busData.directions?.[d.direction_id];
+        return route?.route_number === '733' && dir?.direction_name === 'Box Hill';
+      })
+      .map(d => ({
+        scheduled: new Date(d.scheduled_departure_utc).toISOString(),
+        estimated: d.estimated_departure_utc ? new Date(d.estimated_departure_utc).toISOString() : null,
+        isRealTime: !!d.estimated_departure_utc,
+        route: '733',
+        destination: 'Box Hill via Mt Waverley',
+      }))
+      .slice(0, 4) || [];
+
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       timestamp: new Date().toISOString(),
-      station: 'Burnley',
-      line: 'Glen Waverley',
-      direction: 'Outbound',
-      departures,
+      trains: { station: 'Burnley', line: 'Glen Waverley', departures: trains },
+      buses: { stop: 'Woodside Ave/Clayton Rd', departures: buses },
     }));
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -60,7 +84,6 @@ async function handleAPI(res) {
 
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-
   if (req.url === '/api/departures') return handleAPI(res);
 
   let filePath = req.url === '/' ? '/index.html' : req.url;
